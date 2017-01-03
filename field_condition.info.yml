@@ -1,0 +1,5 @@
+type: module
+name: Field condition
+description: Expose an entity field condition.
+core: 8.x
+package: Condition
