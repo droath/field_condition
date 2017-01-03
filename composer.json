@@ -1,0 +1,14 @@
+{
+    "name": "drupal/field_condition",
+    "description": "Expose a entity field plugin condition.",
+    "type": "drupal-module",
+    "minimum-stability": "dev",
+    "license": "GPL-2.0+",
+    "authors": [
+        {
+            "name": "Travis Tomka",
+            "email": "underoathosx@gmail.com"
+        }
+    ],
+    "require": {}
+}
