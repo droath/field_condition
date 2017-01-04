@@ -13,7 +13,6 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Field\FieldItemListInterface;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
-use Drupal\Core\Plugin\Context\Context;
 use Drupal\Core\TypedData\DataDefinitionInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
@@ -104,10 +103,10 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
     return $this->t(
       'The entity field condition is based on Entity type: @entity
         Entity bundle: @bundle and Entity field: @field', [
-        '@entity' => $field_condition['entity_type'],
-        '@bundle' => $field_condition['entity_bundle'],
-        '@field' => $field_condition['entity_field'],
-      ]
+          '@entity' => $field_condition['entity_type'],
+          '@bundle' => $field_condition['entity_bundle'],
+          '@field' => $field_condition['entity_field'],
+        ]
     );
   }
 
@@ -194,7 +193,7 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
    * @return array
    *   An array of the plugins condition configurations.
    */
-  protected function getVisibilityValues(array $parents = [], FormStateInterface $form_state) {
+  protected function getVisibilityValues(array $parents, FormStateInterface $form_state) {
     $state_value = $form_state->getValue(
       array_merge(['visibility', $this->getPluginId()], $parents)
     );
@@ -219,7 +218,6 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
       $configuration = &$values['field_condition'];
 
       if (!empty($configuration['entity_type'])) {
-        $entity_type = &$configuration['entity_type'];
 
         // Check form display widget items.
         if (isset($configuration['form_display'])
@@ -350,6 +348,7 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
    *   The entity bundle on which to render.
    *
    * @return \Drupal\Core\Entity\EntityInterface
+   *   Return the entity object.
    */
   protected function createDummyEntity($entity_type_id, $bundle = NULL) {
     $entity_storage = $this->entityTypeManager->getStorage($entity_type_id);
@@ -363,10 +362,8 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
   /**
    * Render entity widget form element.
    *
-   * @param string $entity_type
-   *   The field entity type.
-   * @param string $bundle
-   *   The field entity bundle.
+   * @param \Drupal\Core\Entity\EntityInterface $entity
+   *   The entity object.
    * @param string $field_name
    *   The field name.
    * @param \Drupal\Core\Form\FormStateInterface $form_state
@@ -414,7 +411,7 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
   /**
    * Set field widget value based on configuration.
    *
-   * @param \Drupal\Core\Field\FieldItemListInterface $field
+   * @param \Drupal\Core\Field\FieldItemListInterface $field_item
    *   The field item object.
    */
   protected function setFieldItemValue(FieldItemListInterface $field_item) {
@@ -469,8 +466,10 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
     $form['field_condition'][$field_name] = [
       '#type' => 'select',
       '#title' => isset($configs['title'])
-        ? $configs['title']
-        : $this->t('Element @name', ['@name' => ucfirst(strstr($field_name, '_', ' '))]),
+      ? $configs['title']
+      : $this->t('Element @name', [
+        '@name' => ucfirst(strstr($field_name, '_', ' ')),
+      ]),
       '#options' => $element_options,
       '#empty_option' => $this->t('- None -'),
       '#required' => isset($configs['required']) ? $configs['required'] : TRUE,
