@@ -146,24 +146,28 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
       $configs = [
         'title' => $this->t('Entity bundle'),
         'options' => $this->getEntityBundleOptions($entity_type),
+        'multiple' => TRUE,
       ];
       $entity_bundle = $this->buildConditionalDropdown('entity_bundle', $configs, $form, $form_state);
 
+      $diff_options = array_diff_key($entity_bundle, $configs['options']);
+
       if (isset($entity_bundle)
         && !empty($entity_bundle)
-        && isset($configs['options'][$entity_bundle])) {
+        && count($diff_options) === 0) {
 
         // Build conditional drop-down for entity field.
         $configs = [
           'title' => $this->t('Entity field'),
           'options' => $this->getEntityFieldOptions($entity_type, $entity_bundle),
         ];
-        $entity = $this->createDummyEntity($entity_type, $entity_bundle);
         $entity_field = $this->buildConditionalDropdown('entity_field', $configs, $form, $form_state);
 
         if (isset($entity_field)
           && !empty($entity_field)
           && isset($configs['options'][$entity_field])) {
+
+          $entity = $this->createDummyEntity($entity_type, reset($entity_bundle));
 
           // Render entity field widget form.
           $form['field_condition']['form_display'] = $this
@@ -268,8 +272,17 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
       return FALSE;
     }
 
-    if (!isset($field_condition['entity_bundle'])
-      || $entity->getType() !== $field_condition['entity_bundle']) {
+    if (!isset($field_condition['entity_bundle'])) {
+      return FALSE;
+    }
+
+    // Normalize the entity bundles in case it's comes in as string. Which is
+    // needed for backward compatibility.
+    $bundles = is_array($field_condition['entity_bundle'])
+      ? array_values($field_condition['entity_bundle'])
+      : [$field_condition['entity_bundle']];
+
+    if (!in_array($entity->getType(), $bundles)) {
       return FALSE;
     }
 
@@ -297,7 +310,7 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
    * @return array
    *   The form element based on the trigger element parents.
    */
-  public function ajaxEntityFieldCallback($form, FormStateInterface $form_state) {
+  public function ajaxEntityFieldCallback(array $form, FormStateInterface $form_state) {
     $trigger_element = $form_state->getTriggeringElement();
     $element_parents = $trigger_element['#array_parents'];
     array_splice($element_parents, -1);
@@ -473,7 +486,8 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
       '#options' => $element_options,
       '#empty_option' => $this->t('- None -'),
       '#required' => isset($configs['required']) ? $configs['required'] : TRUE,
-      '#default_value' => isset($element_options[$element_value]) ? $element_value : NULL,
+      '#default_value' => $element_value,
+      '#multiple' => isset($configs['multiple']) ? $configs['multiple'] : FALSE,
       '#ajax' => [
         'method' => 'replace',
         'wrapper' => 'entity-field-condition',
@@ -551,32 +565,56 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
   }
 
   /**
-   * Get entity field options.
+   * Get entity field options for given bundles.
+   *
+   * If one entity bundle were given then fields related to that bundle are
+   * returned. If multiple bundles are given then only fields that are
+   * persistent between the selected bundles will be returned.
    *
    * @param string $entity_type
    *   The entity type.
-   * @param string $entity_bundle
-   *   The entity bundle.
+   * @param string $entity_bundles
+   *   An array of entity bundles.
    *
    * @return array
-   *   An array of field options related to the entity type and bundle.
+   *   An array of field options related to the entity type and bundles.
    */
-  protected function getEntityFieldOptions($entity_type, $entity_bundle) {
-    $options = [];
+  protected function getEntityFieldOptions($entity_type, array $entity_bundles) {
+    $groups = $this->getEntityFieldGroupByBundle($entity_type, $entity_bundles);
 
-    foreach ($this
-      ->entityFieldManager
-      ->getFieldDefinitions($entity_type, $entity_bundle) as $field_name => $definition) {
+    return count($groups) === 1
+      ? reset($groups)
+      : call_user_func_array('array_intersect', $groups);
+  }
 
-      if (!$definition instanceof DataDefinitionInterface
-        && $definition->isComputed()) {
-        continue;
+  /**
+   * Get entity field grouped by bundle.
+   *
+   * @param string $entity_type
+   *   The entity type ID.
+   * @param string $entity_bundles
+   *   An array of entity bundles.
+   *
+   * @return array
+   *   An array of entity fields grouped by bundle.
+   */
+  protected function getEntityFieldGroupByBundle($entity_type, array $entity_bundles) {
+    $groups = [];
+
+    foreach ($entity_bundles as $bundle_name) {
+      $fields = $this->entityFieldManager->getFieldDefinitions($entity_type, $bundle_name);
+
+      foreach ($fields as $field_name => $definition) {
+        if (!$definition instanceof DataDefinitionInterface
+          && $definition->isComputed()) {
+          continue;
+        }
+
+        $groups[$bundle_name][$field_name] = $definition->getLabel();
       }
-
-      $options[$field_name] = $definition->getLabel();
     }
 
-    return $options;
+    return $groups;
   }
 
 }
