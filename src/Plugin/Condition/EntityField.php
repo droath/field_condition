@@ -573,7 +573,7 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
    *
    * @param string $entity_type
    *   The entity type.
-   * @param string $entity_bundles
+   * @param array $entity_bundles
    *   An array of entity bundles.
    *
    * @return array
@@ -592,7 +592,7 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
    *
    * @param string $entity_type
    *   The entity type ID.
-   * @param string $entity_bundles
+   * @param array $entity_bundles
    *   An array of entity bundles.
    *
    * @return array
