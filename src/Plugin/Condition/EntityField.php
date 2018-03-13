@@ -11,6 +11,7 @@ use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeBundleInfoInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Field\FieldItemListInterface;
+use Drupal\Core\Field\FieldStorageDefinitionInterface;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
 use Drupal\Core\TypedData\DataDefinitionInterface;
@@ -156,7 +157,6 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
         && !empty($entity_bundle)
         && count($diff_options) === 0) {
 
-        // Build conditional drop-down for entity field.
         $configs = [
           'title' => $this->t('Entity field'),
           'options' => $this->getEntityFieldOptions($entity_type, $entity_bundle),
@@ -169,13 +169,35 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
 
           $entity = $this->createDummyEntity($entity_type, reset($entity_bundle));
 
-          // Render entity field widget form.
+          if (!$entity->hasField($entity_field)) {
+            return [];
+          }
+          $items = $entity->get($entity_field);
+          $field_storage = $items
+            ->getFieldDefinition()
+            ->getFieldStorageDefinition();
+
           $form['field_condition']['form_display'] = $this
             ->renderEntityWidgetForm(
-              $entity,
-              $entity_field,
+              $items,
               $form_state
             );
+
+          if ($field_storage->getCardinality() === FieldStorageDefinitionInterface::CARDINALITY_UNLIMITED) {
+            $compare_method = $this->getVisibilityValues(['field_condition', 'compare_method'], $form_state);
+            $form['field_condition']['compare_method'] = [
+              '#type' => 'select',
+              '#title' => $this->t('Compare Method'),
+              '#description' => $this->t('Determine the method to use when 
+              comparing multiple field values.'),
+              '#default_value' => $compare_method,
+              '#required' => TRUE,
+              '#options' => [
+                'match_all' => $this->t('Match all'),
+                'match_one' => $this->t('Match one')
+              ],
+            ];
+          }
         }
       }
     }
@@ -294,9 +316,17 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
     if (!isset($field_condition['form_display'])) {
       return FALSE;
     }
-    $field_item = $entity->get($field_condition['entity_field']);
+    $items = $entity->get($field_condition['entity_field']);
 
-    return $this->compareFieldItemValues($field_item, $field_condition['form_display']);
+    $compare_values = isset($field_condition['form_display']['widget'])
+      ? $field_condition['form_display']['widget']
+      : [];
+
+    $compare_method = isset($field_condition['compare_method'])
+      ? $field_condition['compare_method']
+      : 'match_all';
+
+    return $this->compareFieldItemValues($items, $compare_values, $compare_method);
   }
 
   /**
@@ -319,37 +349,50 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
   }
 
   /**
-   * Compare field item values based on block visibility values.
+   * Compare entity field values with the widget values in the visibility rule.
    *
    * @param \Drupal\Core\Field\FieldItemListInterface $field_item
    *   The field item object.
-   * @param array $values
-   *   An array of widget items captured on block visibility configurations.
+   * @param array $widget_values
+   *   An array of widget values.
+   * @param string $compare_method
+   *   Determine how values should be compared (match_all, or match_one).
    *
    * @return bool
-   *   Return TRUE if the field item match the provided values; otherwise FALSE.
+   *   Return TRUE if the widget values match entity field values; otherwise
+   *   FALSE.
    */
-  protected function compareFieldItemValues(FieldItemListInterface $field_item, array $values) {
-    if ($field_item->isEmpty() && !empty($values)) {
-      return FALSE;
+  protected function compareFieldItemValues(FieldItemListInterface $items, array $widget_values, $compare_method) {
+    if ($items->isEmpty() && empty($widget_values)) {
+      return TRUE;
     }
-    $widget_items = isset($values['widget']) ? $values['widget'] : [];
+    $storage = $items
+      ->getFieldDefinition()
+      ->getFieldStorageDefinition();
+    $property_name = $storage->getMainPropertyName();
 
-    if ($field_item->count() !== count($widget_items)) {
-      return FALSE;
-    }
+    $item_values = $items->getValue();
+    array_walk($item_values, function(&$value) use ($property_name) {
+      $value = trim($value[$property_name]);
+    });
 
-    foreach ($field_item as $delta => $item) {
-      $widget_item = isset($widget_items[$delta]) ? $widget_items[$delta] : $widget_items;
-
-      foreach ($item->toArray() as $property => $item_value) {
-        if (trim($widget_item[$property]) != trim($item_value)) {
-          return FALSE;
+    switch ($compare_method) {
+      case 'match_all':
+        foreach ($widget_values as $value) {
+          if (!in_array(trim($value[$property_name]), $item_values)) {
+            return FALSE;
+          }
         }
-      }
-    }
+        return TRUE;
 
-    return TRUE;
+      case 'match_one':
+        foreach ($widget_values as $value) {
+          if (in_array(trim($value[$property_name]), $item_values)) {
+            return TRUE;
+          }
+        }
+        return FALSE;
+    }
   }
 
   /**
@@ -375,50 +418,43 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
   /**
    * Render entity widget form element.
    *
-   * @param \Drupal\Core\Entity\EntityInterface $entity
-   *   The entity object.
-   * @param string $field_name
-   *   The field name.
+   * @param FieldItemListInterface $items
+   *   An field item list object.
    * @param \Drupal\Core\Form\FormStateInterface $form_state
    *   The form state object.
    *
    * @return array
    *   A renderable array of the field widget element.
    */
-  protected function renderEntityWidgetForm(EntityInterface $entity, $field_name, FormStateInterface $form_state) {
-    if ($entity->hasField($field_name)) {
-      $field_item = $entity->get($field_name);
+  protected function renderEntityWidgetForm(FieldItemListInterface $items, FormStateInterface $form_state) {
+    $field_definition = $items->getFieldDefinition();
 
-      // Set the field widget value based on inputed config value.
-      $this->setFieldItemValue($field_item);
+    // Set the field widget value based on imputed config value.
+    $this->setFieldItemValue($items);
 
-      // Create a custom field widget instance based on the field definition.
-      $widget = $this->fieldWidgetManager->getInstance([
-        'field_definition' => $field_item->getFieldDefinition(),
-        'form_mode' => 'default',
-        'prepare' => FALSE,
-        'configuration' => [
-          'type' => 'hidden',
-          'settings' => [],
-          'third_party_settings' => [],
-        ],
-      ]);
+    // Create a custom field widget instance based on the field definition.
+    $widget = $this->fieldWidgetManager->getInstance([
+      'field_definition' => $field_definition,
+      'form_mode' => 'default',
+      'prepare' => FALSE,
+      'configuration' => [
+        'type' => 'hidden',
+        'settings' => [],
+        'third_party_settings' => [],
+      ],
+    ]);
 
-      $form = ['#parents' => []];
+    $parent_form = ['#parents' => []];
+    $form_state->set('field_item', $items);
+    $form = $widget->form($items, $parent_form, $form_state);
 
-      $form_state->set('field_item', $field_item);
-      $element_form = $widget->form($field_item, $form, $form_state);
+    // Remove the parents properties on the field widget element, as it causes
+    // problems with capturing the widget value, as we're saving the value
+    // independently from the widget.
+    unset($form['#parents']);
+    unset($form['widget']['#parents']);
 
-      // Remove the parents properties on the field widget element, as it causes
-      // problems with capturing the widget value, as we're saving the value
-      // independently from the widget.
-      unset($element_form['#parents']);
-      unset($element_form['widget']['#parents']);
-
-      return $element_form;
-    }
-
-    return [];
+    return $form;
   }
 
   /**
@@ -463,6 +499,7 @@ class EntityField extends ConditionPluginBase implements ContainerFactoryPluginI
    *
    * @return mixed
    *   The element value.
+   * @throws \Exception
    */
   protected function buildConditionalDropdown($field_name, array $configs, array &$form, FormStateInterface $form_state) {
     if (isset($form['field_condition'][$field_name])) {
